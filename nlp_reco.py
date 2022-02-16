@@ -12,7 +12,7 @@ Original file is located at
 from google.colab import drive
 drive.mount('/content/drive')
 
-"""### Let's first import the basic libraries."""
+"""### Importing libraries"""
 
 # Commented out IPython magic to ensure Python compatibility.
 import numpy as np
@@ -21,15 +21,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 # %matplotlib inline
 
-"""### Let's import the csv file and get a glimpse of the dataset."""
+"""### Import csv file"""
 
 df = pd.read_csv('/content/drive/My Drive/NLP_Reco/sample30.csv')
 print(df.shape)
 df.head()
 
 df.info()
-
-"""### It seems not all transactions have a review. We will drop those transactions later on."""
 
 df.describe()
 
@@ -42,7 +40,11 @@ sns.set(style = 'darkgrid')
 ax = sns.countplot(x = df['reviews_rating'],
                    data = df)
 
-"""### Looking at the bar plot, we find that most users have rated the products as "5"
+percent_val = 100 * df['user_sentiment'].value_counts()/len(df)
+percent_val.plot.bar()
+plt.show()
+
+"""### Looking at the bar plots, we find that most users have rated the products as "5" and "Positive"
 
 ### Data exploratory analysis.
 """
@@ -269,11 +271,15 @@ df_2 = df[df['reviews_rating'] == 2]['reviews_text']
 df_3 = df[df['reviews_rating'] == 3]['reviews_text']
 df_4 = df[df['reviews_rating'] == 4]['reviews_text']
 df_5 = df[df['reviews_rating'] == 5]['reviews_text']
+df_6=df[df['user_sentiment'] == "Positive"]['reviews_text']
+df_7=df[df['user_sentiment'] == "Negative"]['reviews_text']
 print(df_1.shape,
       df_2.shape,
       df_3.shape,
       df_4.shape,
-      df_5.shape)
+      df_5.shape,
+      df_6.shape,
+      df_7.shape)
 
 nltk.download('punkt')
 word_freq(df_1)
@@ -292,6 +298,14 @@ wc(df_4, 'black', 'Wordcloud for 4-Star Rating')
 word_freq(df_5)
 wc(df_5, 'black', 'Wordcloud for 5-Star Rating')
 
+# Word clouds for postive user sentiment
+word_freq(df_6)
+wc(df_6, 'black', 'Wordcloud for Positive user sentiment')
+
+# Word clouds for Negative user sentiment
+word_freq(df_7)
+wc(df_7, 'black', 'Wordcloud for Negative user sentiment')
+
 """### Creation of  TF-IDF vectors for our reviews. We will use Random Forest and XGboost"""
 
 from sklearn.model_selection import cross_val_score
@@ -301,6 +315,13 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 all_text = df['reviews_text']
 train_text = df['reviews_text']
 y = df['reviews_rating']
+
+# Mapping positive sentiment as 1 and negative as 0 
+
+df['Sentiment_coded'] = np.where(df.user_sentiment == 'Positive',1,0)
+
+# Printing the counts of each class
+df['Sentiment_coded'].value_counts()
 
 word_vectorizer = TfidfVectorizer(sublinear_tf = True,
                                   strip_accents = 'unicode',
@@ -322,24 +343,58 @@ char_vectorizer.fit(all_text)
 train_char_features = char_vectorizer.transform(train_text)
 train_features = hstack([train_char_features, train_word_features])
 
+
+
+# Saving the vectorizer to be used for deployment
+
+import pickle
+
+# Save to file in the current working directory
+pkl_filename = "Tfidf_vectorizer.pkl"
+with open(pkl_filename, 'wb') as file:
+    pickle.dump(char_vectorizer, file)
+
+# Load from file
+with open(pkl_filename, 'rb') as file:
+    pickled_tfidf_vectorizer = pickle.load(file)
+
 from sklearn.model_selection import train_test_split
 X_train, X_test, y_train, y_test = train_test_split(train_features,
                                                     y,
                                                     test_size = 0.3,
                                                     random_state = 42)
 
+X_train1 = X_train[:, 0:50000] #fix for Value error
+X_test1 = X_test[:, 0:50000] #fix for Value error
+print(X_train1.shape)
+print(X_test1.shape)
+print(y_train.shape)
+print(y_test.shape)
+
 from sklearn.ensemble import RandomForestClassifier
 
-classifier = RandomForestClassifier()
-classifier.fit(X_train, y_train)
-rf_preds = classifier.predict(X_test)
+classifier = RandomForestClassifier(n_estimators=300)
+classifier.fit(X_train1, y_train)
+rf_preds = classifier.predict(X_test1)
 
 from sklearn.metrics import accuracy_score
 
 rf_accuracy = accuracy_score(rf_preds, y_test)
 print("Random Forest Model accuracy: ", rf_accuracy)
 
-"""### Accuracy score of Random Forest model 76.73%"""
+# Saving the best accuracy model as pickle file
+import pickle
+
+# Save to file in the current working directory
+pkl_filename = "Randomforest_final_model.pkl"
+with open(pkl_filename, 'wb') as file:
+    pickle.dump(classifier, file)
+
+# Load from file
+with open(pkl_filename, 'rb') as file:
+    pickled_model = pickle.load(file)
+
+"""### Accuracy score of Random Forest model 76.67%"""
 
 import xgboost as xgb
 
@@ -366,13 +421,8 @@ print("Naive Bayes Model accuracy: ", rf_accuracy1)
 """### Accuracy score of Naive Bayes model 70.93%.
 
 # From the above three models, we use Random Forest model which has the highest accuracy out of the three models (Random forest, XGBoost and Naive Bayes)
-"""
 
-
-
-
-
-"""# Recommendation System 
+# Recommendation System 
 - User based recommendation
 - User based prediction & evaluation
 - Item based recommendation
@@ -511,6 +561,14 @@ print(user_input)
 user_final_rating.head(2)
 
 d = user_final_rating.loc[user_input].sort_values(ascending=False)[0:20]
+d
+
+mapping=ratings[['id','name']]
+mapping = pd.DataFrame.drop_duplicates(mapping)
+mapping.head()
+
+#Merging product id with mapping file to get the name of the recommended product
+d = pd.merge(d,mapping, left_on='name', right_on='name', how = 'left')
 d
 
 """# Evaluation - User User
@@ -654,6 +712,13 @@ print(user_input)
 d = item_final_rating.loc[user_input].sort_values(ascending=False)[0:20]
 d
 
+mapping=ratings[['id','name']]
+mapping = pd.DataFrame.drop_duplicates(mapping)
+mapping.head()
+
+d = pd.merge(d,mapping, left_on='name', right_on='name', how = 'left')
+d
+
 """# Evaluation - Item Item
 
 ##Evaluation will we same as you have seen above for the prediction. The only difference being, you will evaluate for the product already rated by the user insead of predicting it for the product not rated by the user.
@@ -731,5 +796,74 @@ total_non_nan = np.count_nonzero(~np.isnan(y))
 rmse = (sum(sum((common_ - y )**2))/total_non_nan)**0.5
 print(rmse)
 
+# Take the user ID as input
+user_input = str(input("Enter your user name"))
+print(user_input)
+
+recommendations = user_final_rating.loc[user_input].sort_values(ascending=False)[0:20]
+mapping= ratings[['id','name']]
+mapping = pd.DataFrame.drop_duplicates(mapping)
+recommendations = pd.merge(recommendations,mapping, left_on='name', right_on='name', how = 'left')
+recommendations
+
 """#RMSE for User based recommendation system is lower and is chosen"""
+
+import pickle
+
+user_final_rating.to_pickle("user_final_rating.pkl")
+pickled_user_final_rating = pd.read_pickle("user_final_rating.pkl")
+pickled_user_final_rating
+
+# Save to file in the current working directory
+
+mapping.to_pickle("prod_id_name_mapping.pkl")
+pickled_mapping = pd.read_pickle("prod_id_name_mapping.pkl")
+pickled_mapping
+
+# Save to file in the current working directory
+
+df.to_pickle("reviews_data_all_cols.pkl")
+pickled_reviews_data = pd.read_pickle("reviews_data_all_cols.pkl")
+pickled_reviews_data
+
+"""
+#Improving the recommendations using the sentiment analysis model
+### Recommending top 5 products to the user based based on Random forest model chosen"""
+
+#Improving recommender system
+
+improved_recommendations= pd.merge(recommendations,pickled_reviews_data[['name','reviews_text']], left_on='name', right_on='name', how = 'left')
+test_data_for_user = pickled_tfidf_vectorizer.transform(improved_recommendations['reviews_text'])
+print(test_data_for_user.shape)
+sentiment_prediction_for_user= pickled_model.predict(test_data_for_user)
+df = pd.DataFrame(df, columns=['Predicted_Sentiment'])
+improved_recommendations= pd.concat([improved_recommendations, df], axis=1)
+
+# Recommending top 5 products
+a=improved_recommendations.groupby('name')
+b=pd.DataFrame(a['Predicted_Sentiment'].count()).reset_index()
+b.columns = ['name', 'Total_reviews']
+c=pd.DataFrame(a['Predicted_Sentiment'].sum()).reset_index()
+c.columns = ['name', 'Total_predicted_positive_reviews']
+improved_recommendations_final=pd.merge( b, c, left_on='name', right_on='name', how='left')
+improved_recommendations_final['Positive_sentiment_rate'] = improved_recommendations_final['Total_predicted_positive_reviews'].div(improved_recommendations_final['Total_reviews']).replace(np.inf, 0)
+improved_recommendations_final= improved_recommendations_final.sort_values(by=['Positive_sentiment_rate'], ascending=False )
+improved_recommendations_final=pd.merge(improved_recommendations_final, pickled_mapping, left_on='name', right_on='name', how='left')
+
+#Top 5 recommended product
+improved_recommendations_final['name'].head(5)
+
+#Downloading Pickle files
+#from google.colab import files
+#files.download('user_final_rating.pkl')
+
+#files.download('Randomforest_final_model.pkl')
+
+"""#Deploying the project with a user interface
+An end-to-end web application is deployed using Flask and Heroku Random forest model and User based recommendation system at given URL- https://nlp-reco.herokuapp.com/
+
+The app takes the username as input and submitting, it recommends the top 5 products based on the username entered
+
+All files used to deploy the model are placed at - https://github.com/Nibha2022/sentiment_analysis
+"""
 
